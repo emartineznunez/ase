@@ -11,6 +11,8 @@ import os
 
 import numpy as np
 
+import math
+
 from ase import Atoms
 from ase.calculators.calculator import FileIOCalculator, ReadError, Parameters
 from ase.units import kcal, mol, Debye
@@ -191,6 +193,15 @@ class MOPAC(FileIOCalculator):
                 self.results['energy'] = float(line.split()[3])
             elif line.find('FINAL HEAT OF FORMATION') != -1:
                 self.final_hof = float(line.split()[5]) * kcal / mol
+            elif line.find('BOND ORDERS AND VALENCIES') != -1:
+                bo = []
+                for k in range( math.ceil(len(self.atoms) / 6 ) ):
+                    if k == 0: kf = 0
+                    else: kf = ( (len(self.atoms) + 1) * k - 3 * k * k )
+                    for j in range( min(6, len(self.atoms) - 6 * k - 1 ) ):
+                        bo.append([line.split()[2+j] for line in lines
+                                  [i + j + 6 + kf + 6 * k:i + 5 + len(self.atoms) + kf]])
+                self.bond_order = [item for sublist in bo for item in sublist]
             elif line.find('NO. OF FILLED LEVELS') != -1:
                 self.nspins = 1
                 self.no_occ_levels = int(line.split()[-1])
@@ -201,10 +212,18 @@ class MOPAC(FileIOCalculator):
                 self.results['magmom'] = abs(self.no_alpha_electrons -
                                              self.no_beta_electrons)
             elif line.find('FINAL  POINT  AND  DERIVATIVES') != -1:
-                forces = [-float(line.split()[6])
+                nf = [len(line.split()) == 8
+                     for line in lines[i + 3:i + 3 + 3 * len(self.atoms)]]
+                if not False in nf:
+                    self.forces_permission = True 
+                    forces = [-float(line.split()[6])
                           for line in lines[i + 3:i + 3 + 3 * len(self.atoms)]]
-                self.results['forces'] = np.array(
-                    forces).reshape((-1, 3)) * kcal / mol
+                    self.results['forces'] = np.array(
+                        forces).reshape((-1, 3)) * kcal / mol
+                else:
+                    self.forces_permission = False
+                    self.results['forces'] = np.array (
+                        np.zeros(3 * len(self.atoms)) ).reshape((-1, 3)) 
             elif line.find('EIGENVALUES') != -1:
                 if line.find('ALPHA') != -1:
                     j = i + 1
@@ -266,3 +285,13 @@ class MOPAC(FileIOCalculator):
         """Final heat of formation as reported in the Mopac output file
         """
         return self.final_hof
+
+    def get_bond_order(self):
+        """Bond orders as reported in the Mopac output file
+        """
+        return self.bond_order
+
+    def get_forces_permission(self):
+        """True or False if forces cannot be read from output file
+        """
+        return self.forces_permission
